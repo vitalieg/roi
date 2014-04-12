@@ -1,0 +1,122 @@
+declare
+	@intCodeID bigint,
+	@CUType bigint,
+	@RefID varchar(15),
+	@PresID bigint,
+	@PacientID bigint,
+	@ExternalType varchar(2),
+	@CUSection varchar(100),
+	@CUMedic bigint,
+	@CUDate varchar(16),
+	@DepartureDate varchar(16),
+	@CUEmergency bit,
+	@CURegular bit,
+	@CUDiagnosis varchar(512),
+	@CUDecision bigint,
+	@strDecisionDetails varchar(64),
+	@CURecommendations varchar(512),
+	@CUDetails varchar(512),
+	@UserID bigint,
+	@UserLogin varchar(30),
+	@changeddate smalldatetime,
+	@Validated BIT,
+	@ValidatedByID bigint,
+	@ValidatedDate smalldatetime,
+	@syncchanged smalldatetime,
+	@CUMedic2 bigint,
+	@intDiagnosisT int,
+	@intDiagnosisP int,
+	@intDiagnosisC int,
+	@DiagnosisT nvarchar(200),
+	@DiagnosisP nvarchar(200),
+	@DiagnosisC  nvarchar(200),
+	@strDiagType nchar(1),
+	@strDiagAnexa int,
+	@saveInvalid bit,
+	@validSIUI bit 
+DECLARE db_cursor CURSOR FOR  
+
+select  distinct null as cuid, typeid = (select top 1 id from checkup_types where code = 'DRG4.1'), null as refid, ci1.id as externalid, 
+'CI' as externaltype, co1.pacientid as Pacientid, y.CISectionCode as CUSection, st.id as CUMedic, DataInternare as CUDate, null as DepartureDate,
+0 as CUEmergency, 1 as CURegular, null as CUDiagnosis, null as CURecommendations, 
+NULL as CUDecision, null as CUDecisionDetails, null as CUDetails, 
+userid = (select top 1 ID from staff where firstname like '%ADMIN%')
+, userlogin = (select top 1 login from users where login like '%system%'), DataInternare as changeddate, 1 as validated, st.id as validatedby,  null as validateddate,
+DataInternare as syncchanged, null as CUMedic2, dt.id as Tdiag, dt.id as PDiagID, dt.id as CDiagID, dt.description as TDiagName, 
+dt.description  as PDiagName, dt.description  as CDiagName, null as DiagType, null as DiagAnexa, 0 as SaveInvalid, 0 as ValidSiui 
+
+from DRG_import_MDB.dbo.Pacient_Fisa pf
+inner join checkouts co1 on pf.cazid = co1.cazid  AND pf.CazID NOT LIKE '%|%'
+inner join 
+	(
+	select max(sectioncode) as CISectionCode, max(CodSectieInternare) as idsectie, cazid from (
+		select   distinct sectioncode, CodSectieInternare, cazid from SECTIONS_DRGCODE SD
+		inner join DRG_SECTIONS DS on sd.DRg_id = ds.id
+		inner join DRG_import_MDB.dbo.Lista_Sectii___Filtrat lsf on ds.code = lsf.codsectie 
+		and (case when lsf.numarsectie  = 0 then 1 else lsf.numarsectie end) = sd.sectionno
+		inner join DRG_import_MDB.dbo.Pacient_Fisa pf1 on pf1.CodSectieInternare = lsf.CodSectie --and pf1.NrSectieExternare = sd.SectionNo
+		where pf1.CNP != '0' AND pf1.CazID NOT LIKE '%|%'
+		) x group by cazid
+	)  y on   y.idsectie = pf.CodSectieInternare and y.cazid = co1.cazid
+
+inner join DRG_import_MDB.dbo.Lista_Medici lm on pf.CodMedicCurant = lm.CodParafa
+inner join staff st on 
+(
+	cast(case  when isnumeric(codparafa) = 1 then cast(cast(codparafa as int) as varchar) 
+	else cast(codparafa as varchar) end as varchar) = cast(case  when isnumeric(stampno) = 1 then cast(cast(stampno as int) as varchar) 
+	else cast(stampno as varchar) end as varchar) 
+	OR ( codparafa = right (stampNo,5) and isNumeric(stampNO) = 0)
+)
+inner join DRG_import_MDB.dbo.Lista_Diagnostice ld on pf.CodDP1 = ld.CodDiagnostic
+inner join diagnostictypes dt on ld.CodDiagnostic = dt.code and dt.drg = 1 AND dt.[Type]=1
+inner join checkins ci1 on co1.coid = ci1.coid
+inner join checkin_types ct on pf.idtipinternare = ct.drg_code and ct.active = 1
+left join checkups cu1 on ci1.id = cu1.externalid --and cu1.externaltype = 'PR'
+--LEFT  JOIN INSURERS ins ON ins.DRG_Code = pf.idcategorieasiguratcnas AND ins.Active=1
+LEFT JOIN DRG_CITY dcity ON dcity.Localitate_Cod = pf.idlocalitate
+LEFT JOIN DRG_DISTRICTS dd ON dd.ID=dcity.LocalitateJudet_ID
+LEFT JOIN CITIZENSHIP_TYPES cst ON cst.DRG_Code=pf.IdTipCetatenie
+LEFT JOIN CITIZENSHIPS cs ON cs.DRG_Code=pf.IdCetatenie
+LEFT JOIN PROFESSIONS prf ON prf.DRG_Code = pf.IdOcupatie 
+where  cu1.externalid is null 
+--and nfo not in (select distinct nfo  from Pacient_Proceduri pp inner join Pacient_Fisa pf on pf.cazid = pp.cazid AND [CNP]<>'0')
+AND [NFO] IN (select distinct nfo  FROM DRG_import_MDB..Pacient_Fisa pf WHERE pf.CodICP IS NOT NULL AND [CNP]<>'0')
+
+
+OPEN db_cursor  
+FETCH NEXT FROM db_cursor  into 
+	@intCodeID, @CUType, @RefID, @PresID, @ExternalType, @PacientID, @CUSection, @CUMedic, @CUDate, @DepartureDate, @CUEmergency, @CURegular, 
+	@CUDiagnosis, @CURecommendations, @CUDecision, @strDecisionDetails, @CUDetails, @UserID, @UserLogin, @changeddate, @Validated, 
+	@ValidatedByID, @ValidatedDate, @syncchanged, @CUMedic2, @IntDiagnosisT, @IntDiagnosisP, @IntDiagnosisC, @DiagnosisT, @DiagnosisP, 
+	@DiagnosisC, @strDiagType, @strDiagAnexa, @saveInvalid, @validSIUI  
+
+WHILE @@FETCH_STATUS = 0 
+BEGIN  
+
+	insert  into Checkups_IDENTITY(val) values(0)
+	set @intCodeID = SCOPE_IDENTITY()
+
+	insert into CheckUps (CUID,TypeID, RefID,ExternalID,ExternalType,PacientID, CUSection, CUMedic, CUDate, DepartureDate, CUEmergency,
+	CURegular, CUDiagnosis, CURecommendations, CUDecision, CUDecisionDetails,  CUDetails,UserID,UserLogin, ChangedDate,  
+	 Validated, ValidatedByID, validateddate , syncchanged, CUMedic2, TDiagID 
+	,PDiagID,CDiagID, TDiagName, PDiagName,CDiagName,DiagType,DiagAnexa, saveInvalid, validSIUI)
+	values
+	(@intCodeID, @CUType, @RefID, @PresID, @ExternalType, @PacientID, @CUSection, @CUMedic, @CUDate, @DepartureDate, @CUEmergency, @CURegular, 
+	@CUDiagnosis, @CURecommendations, @CUDecision, @strDecisionDetails, @CUDetails, @UserID, @UserLogin, @changeddate, @Validated, 
+	@ValidatedByID, @ValidatedDate, @syncchanged, @CUMedic2, @IntDiagnosisT, @IntDiagnosisP, @IntDiagnosisC, @DiagnosisT, @DiagnosisP, 
+	@DiagnosisC, @strDiagType, @strDiagAnexa, @saveInvalid, @validSIUI  
+	)
+
+	FETCH NEXT FROM db_cursor  into 
+	@intCodeID, @CUType, @RefID, @PresID, @ExternalType, @PacientID, @CUSection, @CUMedic, @CUDate, @DepartureDate, @CUEmergency, @CURegular, 
+	@CUDiagnosis, @CURecommendations, @CUDecision, @strDecisionDetails, @CUDetails, @UserID, @UserLogin, @changeddate, @Validated, 
+	@ValidatedByID, @ValidatedDate, @syncchanged, @CUMedic2, @IntDiagnosisT, @IntDiagnosisP, @IntDiagnosisC, @DiagnosisT, @DiagnosisP, 
+	@DiagnosisC, @strDiagType, @strDiagAnexa, @saveInvalid, @validSIUI  
+
+
+END   
+
+CLOSE db_cursor		
+DEALLOCATE db_cursor
+
+ 
